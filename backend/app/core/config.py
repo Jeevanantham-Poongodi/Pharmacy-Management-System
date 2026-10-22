@@ -18,8 +18,13 @@ class Settings(BaseSettings):
     supabase_jwt_mode: Literal["jwks", "secret"] = "jwks"
     supabase_jwt_secret: str | None = None
     supabase_jwt_audience: str = "authenticated"
+    # Service role key. Used only by operator scripts (scripts/bootstrap.py), never by requests.
+    supabase_key: str | None = None
 
     cors_origins: str = "http://localhost:5173"
+
+    # Demo deployments only: privileged roles may sign in without MFA (relaxes FR-008).
+    demo_mode: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

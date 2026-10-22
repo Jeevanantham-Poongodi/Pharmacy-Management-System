@@ -54,7 +54,8 @@ def fake_tx():
 @pytest.fixture
 def client(fake_tx):
     app.dependency_overrides[routes.user_tx] = lambda: fake_tx
-    app.dependency_overrides[get_settings] = lambda: Settings(database_url=None)
+    # demo_mode pinned off so a local .env with DEMO_MODE=true doesn't skip the MFA checks.
+    app.dependency_overrides[get_settings] = lambda: Settings(database_url=None, demo_mode=False)
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -252,7 +253,9 @@ def test_privileged_role_without_mfa_is_refused(monkeypatch):
     monkeypatch.setattr(auth, "verify_token", lambda token, settings: {"sub": "u", "aal": "aal1"})
     monkeypatch.setattr(auth, "load_user", lambda claims: make_user(privileged=True, aal="aal1"))
     app.dependency_overrides.clear()
+    app.dependency_overrides[get_settings] = lambda: Settings(database_url=None, demo_mode=False)
     response = TestClient(app).get("/api/v1/me", headers={"Authorization": "Bearer t"})
+    app.dependency_overrides.clear()
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "MFA_REQUIRED"
 

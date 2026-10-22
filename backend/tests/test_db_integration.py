@@ -100,6 +100,7 @@ def two_hospitals(conn):
 
 def test_user_sees_only_own_hospital_items(conn, two_hospitals):
     t = two_hospitals
+    act_as(conn, t["b"])
     insert_item(conn, t["hb"], "B-only item")
     act_as(conn, t["a"])
     insert_item(conn, t["ha"], "A item")
