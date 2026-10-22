@@ -22,7 +22,17 @@ def get_pool() -> ConnectionPool:
         url = get_settings().database_url
         if not url:
             raise AppError(503, "DATABASE_NOT_CONFIGURED", "The database is not configured.")
-        _pool = ConnectionPool(url, min_size=1, max_size=5, open=True, timeout=10)
+        # Check connections before use and keep them alive: dropped connections to the hosted
+        # database otherwise surface as requests that hang until the socket times out.
+        _pool = ConnectionPool(
+            url,
+            min_size=1,
+            max_size=5,
+            open=True,
+            timeout=10,
+            check=ConnectionPool.check_connection,
+            kwargs={"keepalives": 1, "keepalives_idle": 20, "keepalives_interval": 10},
+        )
     return _pool
 
 

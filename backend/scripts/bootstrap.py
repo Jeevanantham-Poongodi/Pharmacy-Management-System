@@ -8,9 +8,12 @@ person's sign-in account first in the Supabase dashboard (Authentication -> User
         --display-name "Admin" --role admin
     python scripts/bootstrap.py grant --hospital-id 1 --role pharmacist --permission items.read
     python scripts/bootstrap.py demo-user --email demo@pharmacy.local --password '...'
+    python scripts/bootstrap.py demo-data --email demo@pharmacy.local
 
 `demo-user` is for demo deployments: it creates the sign-in account itself (needs the service
 role key in SUPABASE_KEY), a hospital if none exists, and makes the account an administrator.
+`demo-data` loads fictional masters, stock and cases in all five flows into that account's
+hospital (scripts/demo_data.py; needs DEMO_MODE=true because one account walks every flow).
 
 Roles come from the actors in the flow diagram plus an administrator (FR-004). Only `admin` gets
 permissions automatically; every other role's permissions are configuration (OI-6).
@@ -124,6 +127,24 @@ def demo_user(
     add_member(conn, hospital_id, email, display_name, "admin")
 
 
+def load_demo_data(conn: psycopg.Connection, settings: Settings, email: str) -> int:
+    from scripts.demo_data import load
+
+    if not settings.demo_mode:
+        print("DEMO_MODE must be true: one demo account walks every flow (D-018)", file=sys.stderr)
+        return 1
+    row = conn.execute(
+        "select m.user_id, m.hospital_id from public.hospital_members m"
+        " join auth.users u on u.id = m.user_id where lower(u.email) = lower(%s) and m.active",
+        (email,),
+    ).fetchone()
+    if row is None:
+        print(f"{email} is not a hospital member; run demo-user first", file=sys.stderr)
+        return 1
+    print(load(settings.database_url, str(row[0]), row[1]))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -142,6 +163,8 @@ def main() -> int:
     p.add_argument("--email", required=True)
     p.add_argument("--password", required=True)
     p.add_argument("--display-name", default="Demo Admin")
+    p = sub.add_parser("demo-data")
+    p.add_argument("--email", default="demo@pharmacy.local")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -155,6 +178,8 @@ def main() -> int:
             add_member(conn, args.hospital_id, args.email, args.display_name, args.role)
         elif args.cmd == "demo-user":
             demo_user(conn, settings, args.email, args.password, args.display_name)
+        elif args.cmd == "demo-data":
+            return load_demo_data(conn, settings, args.email)
         else:
             grant(conn, args.hospital_id, args.role, args.permission)
     return 0
