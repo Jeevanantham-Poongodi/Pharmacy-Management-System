@@ -1,0 +1,993 @@
+openapi: 3.1.0
+info:
+  title: PMS Foundation API
+  version: 1.0.0-draft
+  description: |
+    Feature 001 (Foundation). Source of truth for backend and frontend (constitution XII).
+    Every endpoint except /health requires a verified Supabase access token (D-001).
+    The hospital scope comes from the user's membership, never from the request (Tenant isolation).
+    Endpoints marked `x-posts-stock: true` or `x-idempotent: true` require the Idempotency-Key header.
+servers:
+  - url: /api/v1
+security:
+  - bearerAuth: []
+
+tags:
+  - name: system
+  - name: access
+  - name: master-data
+  - name: stock
+  - name: stock-documents
+  - name: stock-counts
+  - name: audit
+  - name: settings
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      security: []
+      summary: Liveness and database reachability
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status: { type: string, enum: [ok, degraded] }
+
+  /me:
+    get:
+      tags: [access]
+      summary: The signed-in user's hospital, roles, locations and permissions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /users:
+    get:
+      tags: [access]
+      summary: List users of the caller's hospital (permission users.read)
+      parameters: [{ $ref: "#/components/parameters/Page" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/User" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      tags: [access]
+      summary: Create a user account (administrator only; system job user_provisioning)
+      x-idempotent: true
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /users/{userId}:
+    patch:
+      tags: [access]
+      summary: Activate or deactivate a user, set roles and locations
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdate" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /roles:
+    get:
+      tags: [access]
+      summary: Roles and their permissions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Role" }
+
+  /roles/{roleCode}:
+    patch:
+      tags: [access]
+      summary: Set a role's permissions and privileged flag (configuration, audited)
+      parameters:
+        - { name: roleCode, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permissions: { type: array, items: { type: string } }
+                privileged: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Role" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /items:
+    get:
+      tags: [master-data]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - { $ref: "#/components/parameters/Page" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Item" } }
+    post:
+      tags: [master-data]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ItemWrite" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /items/{itemId}:
+    get:
+      tags: [master-data]
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [master-data]
+      summary: Update or deactivate. There is no DELETE (FR-015).
+      parameters: [{ $ref: "#/components/parameters/ItemId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ItemWrite" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Item" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /items/{itemId}/reorder-levels/{locationId}:
+    put:
+      tags: [settings]
+      summary: Set an item's reorder level at a location (audited, with history)
+      parameters:
+        - { $ref: "#/components/parameters/ItemId" }
+        - { $ref: "#/components/parameters/LocationId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reorder_level, reason]
+              properties:
+                reorder_level: { type: integer, minimum: 0 }
+                reason: { type: string, minLength: 1 }
+      responses:
+        "200": { description: OK }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /batches:
+    get:
+      tags: [master-data]
+      parameters:
+        - { name: item_id, in: query, schema: { type: integer } }
+        - { name: batch_number, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/Page" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Batch" } }
+    post:
+      tags: [master-data]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BatchCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Batch" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /locations:
+    get:
+      tags: [master-data]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Location" } }
+    post:
+      tags: [master-data]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocationWrite" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Location" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /locations/{locationId}:
+    patch:
+      tags: [master-data]
+      parameters: [{ $ref: "#/components/parameters/LocationId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LocationWrite" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Location" }
+
+  /vendors:
+    get:
+      tags: [master-data]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Vendor" } }
+    post:
+      tags: [master-data]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VendorWrite" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vendor" }
+
+  /vendors/{vendorId}:
+    patch:
+      tags: [master-data]
+      parameters:
+        - { name: vendorId, in: path, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VendorWrite" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vendor" }
+
+  /stock/balances:
+    get:
+      tags: [stock]
+      summary: Current batch-level balances (FR-021, SC-008)
+      parameters:
+        - { name: item_id, in: query, schema: { type: integer } }
+        - { name: batch_id, in: query, schema: { type: integer } }
+        - { name: location_id, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Balance" } }
+
+  /stock/allocation-proposals:
+    post:
+      tags: [stock]
+      summary: FEFO proposal (read-only, not a reservation). FR-030 to FR-035, D-005, D-013.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [item_id, location_id, quantity]
+              properties:
+                item_id: { type: integer }
+                location_id: { type: integer }
+                quantity: { type: integer, minimum: 1 }
+      responses:
+        "200":
+          description: Proposal in FEFO order; no batch choice is offered (D-011)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AllocationProposal" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /stock-documents:
+    get:
+      tags: [stock-documents]
+      parameters:
+        - { name: type, in: query, schema: { $ref: "#/components/schemas/DocType" } }
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/DocStatus" } }
+        - { $ref: "#/components/parameters/Page" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/StockDocument" } }
+    post:
+      tags: [stock-documents]
+      summary: Raise an opening-stock document or a reversal (the only user-raised types in 001)
+      x-idempotent: true
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StockDocumentCreate" }
+      responses:
+        "201":
+          description: Created in status submitted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockDocument" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /stock-documents/{documentId}:
+    get:
+      tags: [stock-documents]
+      parameters: [{ $ref: "#/components/parameters/DocumentId" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockDocument" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /stock-documents/{documentId}/decision:
+    post:
+      tags: [stock-documents]
+      summary: Approve (posts stock) or reject. Decider must differ from raiser (FR-041).
+      x-posts-stock: true
+      parameters:
+        - { $ref: "#/components/parameters/DocumentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Decision" }
+      responses:
+        "200":
+          description: Decision recorded; when approved, the document is posted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockDocument" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+  /stock-documents/{documentId}/resubmit:
+    post:
+      tags: [stock-documents]
+      summary: Revise a rejected document and resubmit it (FR-042)
+      x-idempotent: true
+      parameters:
+        - { $ref: "#/components/parameters/DocumentId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StockDocumentCreate" }
+      responses:
+        "200":
+          description: Resubmitted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockDocument" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /stock-counts:
+    post:
+      tags: [stock-counts]
+      summary: Start a count for a location; freezes the snapshot (FR-070)
+      x-idempotent: true
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [location_id]
+              properties:
+                location_id: { type: integer }
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockCount" }
+    get:
+      tags: [stock-counts]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/StockCount" } }
+
+  /stock-counts/{countId}:
+    get:
+      tags: [stock-counts]
+      parameters: [{ $ref: "#/components/parameters/CountId" }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockCount" }
+
+  /stock-counts/{countId}/lines:
+    put:
+      tags: [stock-counts]
+      summary: Enter counted quantities per batch (FR-071)
+      parameters: [{ $ref: "#/components/parameters/CountId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [batch_id, counted_quantity]
+                properties:
+                  batch_id: { type: integer }
+                  counted_quantity: { type: integer, minimum: 0 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockCount" }
+
+  /stock-counts/{countId}/submit:
+    post:
+      tags: [stock-counts]
+      x-idempotent: true
+      parameters:
+        - { $ref: "#/components/parameters/CountId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      responses:
+        "200":
+          description: Submitted; nothing posted yet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockCount" }
+
+  /stock-counts/{countId}/decision:
+    post:
+      tags: [stock-counts]
+      summary: Approve (posts one adjustment document) or reject (FR-072)
+      x-posts-stock: true
+      parameters:
+        - { $ref: "#/components/parameters/CountId" }
+        - { $ref: "#/components/parameters/IdempotencyKey" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Decision" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StockCount" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /approval-rules:
+    get:
+      tags: [access]
+      summary: Which role approves which document type (configuration, FR-043)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ApprovalRule" } }
+
+  /approval-rules/{subjectType}/{docType}:
+    put:
+      tags: [access]
+      summary: Set the approver role for a document type (audited)
+      parameters:
+        - { name: subjectType, in: path, required: true, schema: { type: string, enum: [stock_document, stock_count] } }
+        - { name: docType, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approver_role_code, reason]
+              properties:
+                approver_role_code: { type: string }
+                reason: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApprovalRule" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /audit-entries:
+    get:
+      tags: [audit]
+      summary: Search the audit trail (permission audit.read)
+      parameters:
+        - { name: entity_type, in: query, schema: { type: string } }
+        - { name: entity_id, in: query, schema: { type: string } }
+        - { name: actor_user_id, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { $ref: "#/components/parameters/Page" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/AuditEntry" } }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /audit-exports:
+    post:
+      tags: [audit]
+      summary: Export audit entries; the export itself is audited with its filters (FR-052)
+      x-idempotent: true
+      parameters: [{ $ref: "#/components/parameters/IdempotencyKey" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                entity_type: { type: string }
+                from: { type: string, format: date-time }
+                to: { type: string, format: date-time }
+      responses:
+        "200":
+          description: CSV export
+          content:
+            text/csv:
+              schema: { type: string }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /settings:
+    get:
+      tags: [settings]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Setting" } }
+
+  /settings/{key}:
+    get:
+      tags: [settings]
+      summary: Current value, or the value in force on a past date (FR-061)
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+        - { name: as_of, in: query, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Setting" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      tags: [settings]
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value, reason]
+              properties:
+                value: {}
+                reason: { type: string, minLength: 1 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Setting" }
+        "403": { $ref: "#/components/responses/Error" }
+        "422": { $ref: "#/components/responses/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase access token, verified by the backend (research R3)
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Scoped to hospital, user and operation. Same key + same body returns the original result.
+        Same key + different body → 422 IDEMPOTENCY_KEY_REUSED. Same key while the first request
+        is running → 409 REQUEST_IN_PROGRESS. Missing → 400 IDEMPOTENCY_KEY_REQUIRED.
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    Page:
+      name: cursor
+      in: query
+      schema: { type: string }
+    ItemId: { name: itemId, in: path, required: true, schema: { type: integer } }
+    LocationId: { name: locationId, in: path, required: true, schema: { type: integer } }
+    DocumentId: { name: documentId, in: path, required: true, schema: { type: integer } }
+    CountId: { name: countId, in: path, required: true, schema: { type: integer } }
+
+  responses:
+    Error:
+      description: Error envelope (constitution XII)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, request_id]
+          properties:
+            code:
+              type: string
+              description: |
+                Stable codes include UNAUTHENTICATED, FORBIDDEN, MFA_REQUIRED, NOT_FOUND,
+                VALIDATION_FAILED, IDEMPOTENCY_KEY_REQUIRED, IDEMPOTENCY_KEY_REUSED,
+                REQUEST_IN_PROGRESS, INSUFFICIENT_STOCK, SELF_APPROVAL_FORBIDDEN,
+                ALREADY_REVERSED, DELETE_FORBIDDEN, SETTING_MISSING, CONFLICT
+            message: { type: string }
+            details: {}
+            request_id: { type: string }
+
+    Me:
+      type: object
+      required: [user_id, hospital_id, roles, location_ids, permissions]
+      properties:
+        user_id: { type: string, format: uuid }
+        hospital_id: { type: integer }
+        display_name: { type: string }
+        roles: { type: array, items: { type: string } }
+        location_ids: { type: array, items: { type: integer } }
+        permissions: { type: array, items: { type: string } }
+        mfa_satisfied: { type: boolean }
+
+    User:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        display_name: { type: string }
+        active: { type: boolean }
+        roles: { type: array, items: { type: string } }
+        location_ids: { type: array, items: { type: integer } }
+    UserCreate:
+      type: object
+      required: [email, display_name, roles, location_ids]
+      properties:
+        email: { type: string, format: email }
+        display_name: { type: string, minLength: 1 }
+        roles: { type: array, items: { type: string }, minItems: 1 }
+        location_ids: { type: array, items: { type: integer } }
+    UserUpdate:
+      type: object
+      properties:
+        active: { type: boolean }
+        roles: { type: array, items: { type: string } }
+        location_ids: { type: array, items: { type: integer } }
+        reason: { type: string }
+
+    Role:
+      type: object
+      properties:
+        code: { type: string }
+        name: { type: string }
+        privileged: { type: boolean }
+        permissions: { type: array, items: { type: string } }
+
+    Item:
+      allOf:
+        - $ref: "#/components/schemas/ItemWrite"
+        - type: object
+          properties:
+            id: { type: integer }
+    ItemWrite:
+      type: object
+      required: [name, base_unit, formulary_status, controlled_class]
+      properties:
+        name: { type: string, minLength: 1 }
+        base_unit: { type: string, minLength: 1 }
+        formulary_status: { type: string, enum: [formulary, non_formulary] }
+        controlled_class: { type: string, enum: [none, narcotic, schedule_x] }
+        active: { type: boolean }
+        reason: { type: string }
+
+    Batch:
+      allOf:
+        - $ref: "#/components/schemas/BatchCreate"
+        - type: object
+          properties:
+            id: { type: integer }
+            first_receipt_posted_at: { type: [string, "null"], format: date-time }
+            active: { type: boolean }
+    BatchCreate:
+      type: object
+      required: [item_id, batch_number, expiry_date]
+      properties:
+        item_id: { type: integer }
+        batch_number: { type: string, minLength: 1 }
+        expiry_date: { type: string, format: date }
+
+    Location:
+      allOf:
+        - $ref: "#/components/schemas/LocationWrite"
+        - type: object
+          properties:
+            id: { type: integer }
+            allocatable: { type: boolean, readOnly: true }
+    LocationWrite:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, minLength: 1 }
+        type: { type: string, enum: [central_store, pharmacy, ward, ot, icu, qc, quarantine] }
+        active: { type: boolean }
+
+    Vendor:
+      allOf:
+        - $ref: "#/components/schemas/VendorWrite"
+        - type: object
+          properties:
+            id: { type: integer }
+    VendorWrite:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        active: { type: boolean }
+
+    Balance:
+      type: object
+      properties:
+        item_id: { type: integer }
+        batch_id: { type: integer }
+        batch_number: { type: string }
+        expiry_date: { type: string, format: date }
+        location_id: { type: integer }
+        quantity: { type: integer, minimum: 0 }
+
+    AllocationProposal:
+      type: object
+      required: [lines, shortfall]
+      properties:
+        lines:
+          type: array
+          description: FEFO order — expiry, first receipt time, batch id (D-005)
+          items:
+            type: object
+            properties:
+              batch_id: { type: integer }
+              batch_number: { type: string }
+              expiry_date: { type: string, format: date }
+              quantity: { type: integer, minimum: 1 }
+        shortfall: { type: integer, minimum: 0 }
+
+    DocType:
+      type: string
+      enum: [receipt, issue, transfer, return, adjustment, write_off, opening_stock, reversal]
+    DocStatus:
+      type: string
+      enum: [draft, submitted, rejected, posted]
+
+    StockDocumentCreate:
+      oneOf:
+        - type: object
+          required: [type, location_id, lines]
+          properties:
+            type: { const: opening_stock }
+            location_id: { type: integer }
+            lines:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [batch_id, quantity]
+                properties:
+                  batch_id: { type: integer }
+                  quantity: { type: integer, minimum: 1 }
+        - type: object
+          required: [type, reverses_document_id, reason]
+          properties:
+            type: { const: reversal }
+            reverses_document_id: { type: integer }
+            reason: { type: string, minLength: 1 }
+
+    StockDocument:
+      type: object
+      properties:
+        id: { type: integer }
+        doc_number: { type: string }
+        type: { $ref: "#/components/schemas/DocType" }
+        status: { $ref: "#/components/schemas/DocStatus" }
+        reason: { type: [string, "null"] }
+        reverses_document_id: { type: [integer, "null"] }
+        raised_by: { type: string, format: uuid }
+        posted_by: { type: [string, "null"], format: uuid }
+        posted_at: { type: [string, "null"], format: date-time }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              item_id: { type: integer }
+              batch_id: { type: integer }
+              from_location_id: { type: [integer, "null"] }
+              to_location_id: { type: [integer, "null"] }
+              quantity: { type: integer }
+        decisions:
+          type: array
+          items: { $ref: "#/components/schemas/ApprovalRecord" }
+
+    Decision:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+        reason: { type: string, description: Required when rejected }
+
+    ApprovalRecord:
+      type: object
+      properties:
+        decision: { type: string, enum: [approved, rejected] }
+        decided_by: { type: string, format: uuid }
+        reason: { type: [string, "null"] }
+        decided_at: { type: string, format: date-time }
+
+    StockCount:
+      type: object
+      properties:
+        id: { type: integer }
+        location_id: { type: integer }
+        status: { type: string, enum: [open, submitted, approved, rejected] }
+        raised_by: { type: string, format: uuid }
+        snapshot_at: { type: string, format: date-time }
+        adjustment_document_id: { type: [integer, "null"] }
+        lines:
+          type: array
+          items:
+            type: object
+            properties:
+              item_id: { type: integer }
+              batch_id: { type: integer }
+              snapshot_quantity: { type: integer }
+              counted_quantity: { type: [integer, "null"] }
+              variance: { type: [integer, "null"] }
+
+    AuditEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        actor_user_id: { type: [string, "null"], format: uuid }
+        system_job: { type: [string, "null"] }
+        action: { type: string }
+        entity_type: { type: string }
+        entity_id: { type: string }
+        before: {}
+        after: {}
+        reason: { type: [string, "null"] }
+        request_id: { type: string }
+        created_at: { type: string, format: date-time }
+        entry_hash: { type: string }
+
+    ApprovalRule:
+      type: object
+      properties:
+        subject_type: { type: string, enum: [stock_document, stock_count] }
+        doc_type: { type: string }
+        approver_role_code: { type: string }
+
+    Setting:
+      type: object
+      properties:
+        key: { type: string }
+        value: {}
+        valid_from: { type: string, format: date-time }
+        updated_by: { type: string, format: uuid }

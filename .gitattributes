@@ -1,0 +1,4 @@
+# Keep LF so Spec Kit bash scripts run on every OS
+* text=auto eol=lf
+*.pdf binary
+*.png binary

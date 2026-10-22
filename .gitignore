@@ -1,0 +1,11 @@
+# Code lives in its own repos
+backend/
+frontend/
+
+# Local archives and OS files
+*.zip
+.DS_Store
+node_modules/
+
+# Per-user Claude settings
+.claude/settings.local.json
