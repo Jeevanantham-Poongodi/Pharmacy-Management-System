@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link as RouterLink, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Alert,
@@ -22,9 +22,12 @@ import {
 } from '@mui/material'
 import { App as AntApp } from 'antd'
 import { PlusOutlined, ScanOutlined } from '@ant-design/icons'
-import { api, describeError, type CaseSummary } from '../api'
-import { flowFromPath, useReference } from '../state/reference'
-import { hasNewCaseForm, NewCaseDialog } from './newCase/NewCaseDialog'
+import { api, describeError } from '../api'
+import { useAsync } from '../hooks/useAsync'
+import { flowFromPath } from '../state/flowPaths'
+import { useReference } from '../state/referenceContext'
+import { hasNewCaseForm } from './newCase/forms'
+import { NewCaseDialog } from './newCase/NewCaseDialog'
 
 export function FlowCases() {
   const { flowPath } = useParams()
@@ -36,30 +39,14 @@ export function FlowCases() {
   const show = params.get('show') ?? 'open'
   const navigate = useNavigate()
   const { message } = AntApp.useApp()
-  const [cases, setCases] = useState<CaseSummary[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [scanning, setScanning] = useState(false)
-
-  const load = useCallback(async () => {
-    if (!flowNumber) return
-    setError(null)
-    try {
-      setCases(
-        await api.listCases({
-          flow: flowNumber,
-          node: node || undefined,
-          open: show === 'all' ? undefined : show === 'open',
-        }),
-      )
-    } catch (e) {
-      setError(describeError(e))
-    }
-  }, [flowNumber, node, show])
-
-  useEffect(() => {
-    void load()
-  }, [load])
+  const list = useAsync(
+    () => api.listCases({ flow: flowNumber, node: node || undefined, open: show === 'all' ? undefined : show === 'open' }),
+    `cases-${flowNumber}-${node}-${show}`,
+  )
+  const cases = list.data ?? list.previous
+  const error = list.error
 
   if (!definition) return <Alert severity="error">Unknown flow.</Alert>
 
@@ -75,7 +62,7 @@ export function FlowCases() {
     try {
       const result = await api.expiryScan()
       message.success(result.created ? `${result.created} expiry case(s) created` : 'No new near-expiry stock found')
-      await load()
+      list.reload()
     } catch (e) {
       message.error(describeError(e))
     } finally {
@@ -126,7 +113,16 @@ export function FlowCases() {
         {cases === null ? (
           <LinearProgress />
         ) : cases.length === 0 ? (
-          <Typography sx={{ color: 'text.secondary', py: 3, textAlign: 'center' }}>No cases here yet.</Typography>
+          <Stack spacing={1} sx={{ py: 3, alignItems: 'center' }}>
+            <Typography sx={{ color: 'text.secondary' }}>
+              {node || show !== 'open' ? 'No cases at this step right now.' : 'No open cases yet.'}
+            </Typography>
+            {(node || show !== 'open') && (
+              <Button size="small" onClick={() => setParams({ show: 'all' })}>
+                Show all cases
+              </Button>
+            )}
+          </Stack>
         ) : (
           <Box sx={{ overflowX: 'auto' }}>
             <Table size="small">

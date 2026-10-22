@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MenuItem, TextField } from '@mui/material'
-import { useReference } from '../../state/reference'
-import { EMPTY_LINE, LinesEditor, validLines, type DraftLine } from './LinesEditor'
+import { useReference } from '../../state/referenceContext'
+import { LinesEditor } from './LinesEditor'
+import { EMPTY_LINE, validLines, type DraftLine } from './lines'
 import type { FormProps } from './NewCaseDialog'
 
 // F2:"Ward, OT or ICU needs stock"

@@ -16,6 +16,7 @@ import {
   Typography,
 } from '@mui/material'
 import { App as AntApp } from 'antd'
+import { actionLabel } from './actionLabel'
 import { api, describeError, type CaseDetail, type FlowEdge, type Item, type Location, type Vendor } from '../api'
 
 // One button per arrow leaving the case's current step, labelled with the diagram's outcome.
@@ -28,10 +29,6 @@ type Props = {
   locations: Location[]
   vendors: Vendor[]
   onDone: (updated: CaseDetail) => void
-}
-
-export function actionLabel(edge: FlowEdge, targetLabel: (node: string) => string): string {
-  return edge.outcome ?? `Continue: ${targetLabel(edge.to)}`
 }
 
 const NEGATIVE = /^(No|Rejected|Fail|Declined|Drop|Short|Wrong|Order cancelled|Rejected or unclear)/

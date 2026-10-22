@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Alert,
   Box,
@@ -15,20 +15,21 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { api, describeError, type Balance } from '../api'
+import { api } from '../api'
 import { ExpiryChip } from '../components/ExpiryChip'
-import { useReference } from '../state/reference'
+import { useAsync } from '../hooks/useAsync'
+import { label } from '../labels'
+import { useReference } from '../state/referenceContext'
 
 // Balance per location, item and batch (FR-031). Balances are the sum of posted ledger lines.
 export function Stock() {
   const { locations } = useReference()
   const [locationId, setLocationId] = useState('')
-  const [rows, setRows] = useState<Balance[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api.balances({ location_id: locationId ? Number(locationId) : undefined }).then(setRows, (e) => setError(describeError(e)))
-  }, [locationId])
+  const { data, previous, error } = useAsync(
+    () => api.balances({ location_id: locationId ? Number(locationId) : undefined }),
+    `balances-${locationId}`,
+  )
+  const rows = data ?? previous
 
   return (
     <Stack spacing={2}>
@@ -67,7 +68,9 @@ export function Stock() {
                   <TableRow key={`${r.location_id}-${r.batch_id}`}>
                     <TableCell>
                       {r.location_name}
-                      {r.location_kind.startsWith('quarantine') && <Chip size="small" label="quarantine" sx={{ ml: 1 }} />}
+                      {r.location_kind.startsWith('quarantine') && (
+                        <Chip size="small" color="warning" variant="outlined" label={label('location_kind', r.location_kind)} sx={{ ml: 1 }} />
+                      )}
                     </TableCell>
                     <TableCell>{r.item_name}</TableCell>
                     <TableCell>

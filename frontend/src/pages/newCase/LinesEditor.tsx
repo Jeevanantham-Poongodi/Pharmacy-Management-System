@@ -1,16 +1,8 @@
 import { Box, Button, IconButton, MenuItem, Stack, TextField } from '@mui/material'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import type { Item } from '../../api'
-
-export type DraftLine = { item_id: string; qty: string }
-
-export const EMPTY_LINE: DraftLine = { item_id: '', qty: '' }
-
-export function validLines(lines: DraftLine[]) {
-  return lines
-    .filter((l) => l.item_id && Number(l.qty) > 0)
-    .map((l) => ({ item_id: Number(l.item_id), qty: Number(l.qty) }))
-}
+import { label } from '../../labels'
+import { EMPTY_LINE, type DraftLine } from './lines'
 
 export function LinesEditor({
   items,
@@ -33,8 +25,8 @@ export function LinesEditor({
               .map((item) => (
                 <MenuItem key={item.id} value={String(item.id)}>
                   {item.name}
-                  {item.controlled_class !== 'none' ? ' · NDPS' : ''}
-                  {item.formulary_status === 'non_formulary' ? ' · non-formulary' : ''}
+                  {item.controlled_class !== 'none' ? ` · ${label('controlled_class', item.controlled_class)}` : ''}
+                  {item.formulary_status === 'non_formulary' ? ` · ${label('formulary_status', item.formulary_status)}` : ''}
                 </MenuItem>
               ))}
           </TextField>

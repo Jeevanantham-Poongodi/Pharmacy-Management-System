@@ -1,20 +1,10 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { api, describeError, type FlowDefinition, type Item, type Location, type Vendor } from '../api'
+import { ReferenceContext, type Reference } from './referenceContext'
 
 // Data every flow screen needs: the flow definitions (the diagram as data, served by the backend)
 // and the masters used in forms. Loaded once after sign-in.
 
-type Reference = {
-  flows: FlowDefinition[]
-  items: Item[]
-  locations: Location[]
-  vendors: Vendor[]
-  flow: (n: number) => FlowDefinition | undefined
-  nodeLabel: (flow: number, node: string) => string
-  reload: () => void
-}
-
-const ReferenceContext = createContext<Reference | null>(null)
 
 export type ReferenceState =
   | { state: 'loading' }
@@ -52,23 +42,4 @@ export function ReferenceProvider({ children, fallback }: { children: ReactNode;
     reload,
   }
   return <ReferenceContext.Provider value={value}>{children}</ReferenceContext.Provider>
-}
-
-export function useReference(): Reference {
-  const value = useContext(ReferenceContext)
-  if (!value) throw new Error('useReference outside ReferenceProvider')
-  return value
-}
-
-export const FLOW_PATHS: Record<number, string> = {
-  1: 'procurement',
-  2: 'ward-indent',
-  3: 'dispensing',
-  4: 'expiry',
-  5: 'recall',
-}
-
-export function flowFromPath(path: string | undefined): number | undefined {
-  const entry = Object.entries(FLOW_PATHS).find(([, p]) => p === path)
-  return entry ? Number(entry[0]) : undefined
 }

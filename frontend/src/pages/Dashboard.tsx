@@ -1,17 +1,14 @@
-import { useEffect, useState } from 'react'
 import { Link as RouterLink } from 'react-router-dom'
 import { Alert, Box, LinearProgress, Link, Paper, Stack, Typography } from '@mui/material'
-import { api, describeError, type Dashboard as Data } from '../api'
-import { FLOW_PATHS, useReference } from '../state/reference'
+import { api } from '../api'
+import { DemoTour } from '../components/DemoTour'
+import { useAsync } from '../hooks/useAsync'
+import { FLOW_PATHS } from '../state/flowPaths'
+import { useReference } from '../state/referenceContext'
 
 export function Dashboard() {
   const { flows } = useReference()
-  const [data, setData] = useState<Data | null>(null)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    api.dashboard().then(setData, (e) => setError(describeError(e)))
-  }, [])
+  const { data, error } = useAsync(() => api.dashboard(), 'dashboard')
 
   if (error) return <Alert severity="error">{error}</Alert>
   if (!data) return <LinearProgress />
@@ -21,6 +18,7 @@ export function Dashboard() {
       <Typography variant="h5" sx={{ fontWeight: 600 }}>
         Dashboard
       </Typography>
+      <DemoTour />
 
       <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { sm: 'repeat(3, 1fr)' } }}>
         {data.near_expiry.map((bucket) => (

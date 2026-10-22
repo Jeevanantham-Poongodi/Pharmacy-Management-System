@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Alert, LinearProgress } from '@mui/material'
@@ -17,6 +17,19 @@ import { ReferenceProvider } from './state/reference'
 
 type Profile = { state: 'loading' } | { state: 'ready'; me: Me } | { state: 'mfa' } | { state: 'error'; message: string }
 
+// Sets the profile only when the request settles (never synchronously inside an effect).
+function fetchProfile(setProfile: (profile: Profile) => void) {
+  return api.me().then(
+    (me) => setProfile({ state: 'ready', me }),
+    (error) =>
+      setProfile(
+        error instanceof ApiError && error.code === 'MFA_REQUIRED'
+          ? { state: 'mfa' }
+          : { state: 'error', message: describeError(error) },
+      ),
+  )
+}
+
 function App() {
   const [health, setHealth] = useState<Health | null>(null)
   const [healthError, setHealthError] = useState<string | null>(null)
@@ -34,20 +47,12 @@ function App() {
     return () => data.subscription.unsubscribe()
   }, [])
 
-  const loadProfile = useCallback(async () => {
-    setProfile({ state: 'loading' })
-    try {
-      setProfile({ state: 'ready', me: await api.me() })
-    } catch (error) {
-      if (error instanceof ApiError && error.code === 'MFA_REQUIRED') setProfile({ state: 'mfa' })
-      else setProfile({ state: 'error', message: describeError(error) })
-    }
-  }, [])
+  const loadProfile = () => void fetchProfile(setProfile)
 
   const accessToken = session?.access_token
   useEffect(() => {
-    if (accessToken) void loadProfile()
-  }, [accessToken, loadProfile])
+    if (accessToken) void fetchProfile(setProfile)
+  }, [accessToken])
 
   if (!authConfigError && !session) return <SignIn />
 
@@ -67,14 +72,7 @@ function App() {
               <Route path="/flows/:flowPath" element={<FlowCases />} />
               <Route path="/cases/:caseId" element={<CaseDetail />} />
               <Route path="/stock" element={<Stock />} />
-              <Route
-                path="/items"
-                element={
-                  <div className="app">
-                    <Items canWrite={me.permissions.includes('items.write')} />
-                  </div>
-                }
-              />
+              <Route path="/items" element={<Items canWrite={me.permissions.includes('items.write')} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </ReferenceProvider>
@@ -105,11 +103,19 @@ function App() {
         {authConfigError ? (
           <p className="error card">{authConfigError}</p>
         ) : profile.state === 'mfa' ? (
-          <MfaStep onDone={() => void loadProfile()} />
+          <MfaStep onDone={loadProfile} />
         ) : profile.state === 'error' ? (
           <div className="card">
             <p className="error" role="alert">{profile.message}</p>
-            <button type="button" onClick={() => void loadProfile()}>Retry</button>
+            <button
+              type="button"
+              onClick={() => {
+                setProfile({ state: 'loading' })
+                loadProfile()
+              }}
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <p className="muted">Loading your account…</p>

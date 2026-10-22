@@ -19,10 +19,6 @@ const FORMS: Record<number, { title: string; Form: (p: FormProps) => React.JSX.E
   5: { title: 'New recall', Form: RecallForm },
 }
 
-export function hasNewCaseForm(flow: number) {
-  return flow in FORMS
-}
-
 export function NewCaseDialog({ flow, onClose, onCreated }: { flow: number; onClose: () => void; onCreated: (c: CaseDetail) => void }) {
   const { message } = AntApp.useApp()
   const [body, setBody] = useState<CaseCreate | null>(null)

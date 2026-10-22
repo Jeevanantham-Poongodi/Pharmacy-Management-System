@@ -1,47 +1,42 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link as RouterLink, useParams } from 'react-router-dom'
 import { Alert, Box, Breadcrumbs, Chip, LinearProgress, Link, Paper, Stack, Typography } from '@mui/material'
-import { api, describeError, type BatchTrace, type CaseDetail as Detail } from '../api'
+import { api, type BatchTrace, type CaseDetail as Detail } from '../api'
 import { ActionPanel } from '../components/ActionPanel'
 import { CaseHistory } from '../components/CaseHistory'
 import { FlowMap } from '../components/FlowMap'
 import { LinesTable } from '../components/LinesTable'
-import { FLOW_PATHS, useReference } from '../state/reference'
+import { useAsync } from '../hooks/useAsync'
+import { label as codeLabel, type LabelGroup } from '../labels'
+import { FLOW_PATHS } from '../state/flowPaths'
+import { useReference } from '../state/referenceContext'
 
-const DETAIL_LABELS: Record<string, string> = {
-  order_type: 'Order type',
-  patient_ref: 'Patient',
-  prescriber: 'Prescriber',
-  trigger: 'Trigger',
-  window_days: 'Alert window (days)',
-  source: 'Notice from',
-  choice: 'Action chosen',
+// Case details shown on the page; `codes` names the label group for stored codes.
+const DETAIL_LABELS: Record<string, { name: string; codes?: LabelGroup }> = {
+  order_type: { name: 'Order type', codes: 'order_type' },
+  patient_ref: { name: 'Patient' },
+  prescriber: { name: 'Prescriber' },
+  trigger: { name: 'Trigger', codes: 'trigger' },
+  window_days: { name: 'Alert window (days)' },
+  source: { name: 'Notice from', codes: 'source' },
+  choice: { name: 'Action chosen', codes: 'choice' },
 }
 
 export function CaseDetail() {
   const id = Number(useParams().caseId)
   const { flow, nodeLabel, locations, vendors, items } = useReference()
-  const [detail, setDetail] = useState<Detail | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [trace, setTrace] = useState<BatchTrace | null>(null)
+  const loaded = useAsync(() => api.getCase(id), `case-${id}`)
+  // The case as returned by the last action taken on this page, if newer than the load.
+  const [moved, setMoved] = useState<Detail | null>(null)
+  const detail = moved && moved.id === id ? moved : loaded.data
+  const error = loaded.error
 
-  const load = useCallback(async () => {
-    setError(null)
-    try {
-      setDetail(await api.getCase(id))
-    } catch (e) {
-      setError(describeError(e))
-    }
-  }, [id])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  const batchId = detail?.flow === 5 ? Number(detail.data.batch_id) : null
-  useEffect(() => {
-    if (batchId) void api.batchTrace(batchId).then(setTrace, () => setTrace(null))
-  }, [batchId, detail?.node])
+  const batchId = detail?.flow === 5 ? Number(detail.data.batch_id) : 0
+  const traced = useAsync<BatchTrace | null>(
+    () => (batchId ? api.batchTrace(batchId) : Promise.resolve(null)),
+    `trace-${batchId}-${detail?.node}`,
+  )
+  const trace = traced.data
 
   if (error) return <Alert severity="error">{error}</Alert>
   if (!detail) return <LinearProgress />
@@ -53,7 +48,10 @@ export function CaseDetail() {
   const details: [string, string][] = [
     ...Object.entries(DETAIL_LABELS)
       .filter(([key]) => detail.data[key] !== undefined && detail.data[key] !== null)
-      .map(([key, name]): [string, string] => [name, String(detail.data[key]).replace(/_/g, ' ')]),
+      .map(([key, { name, codes }]): [string, string] => [
+        name,
+        codes ? codeLabel(codes, detail.data[key]) : String(detail.data[key]),
+      ]),
     ...(detail.data.ward_location_id ? [['Ward', locationName(detail.data.ward_location_id) ?? '']] as [string, string][] : []),
     ...(detail.data.location_id ? [['Location', locationName(detail.data.location_id) ?? '']] as [string, string][] : []),
     ...(vendorName ? [['Vendor', vendorName]] as [string, string][] : []),
@@ -97,7 +95,7 @@ export function CaseDetail() {
           items={items}
           locations={locations}
           vendors={vendors}
-          onDone={setDetail}
+          onDone={setMoved}
         />
       </Paper>
 

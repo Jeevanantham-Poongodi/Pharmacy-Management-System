@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { App as AntApp } from 'antd'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { CaseDetail, FlowEdge } from '../src/api'
-import { ActionPanel, actionLabel } from '../src/components/ActionPanel'
+import { ActionPanel } from '../src/components/ActionPanel'
+import { actionLabel } from '../src/components/actionLabel'
 
 vi.mock('../src/supabaseClient', () => ({ auth: null, authConfigError: null }))
 
