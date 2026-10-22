@@ -1,0 +1,351 @@
+openapi: 3.1.0
+info:
+  title: PMS API — Flow Pages (002)
+  version: 0.2.0
+  description: >
+    Endpoints added by feature 002. All require a bearer token (Supabase access token) and use the
+    error envelope {"error": {"code", "message", "details", "request_id"}}. No Idempotency-Key
+    (D-018).
+servers:
+  - url: http://localhost:8000
+security:
+  - bearer: []
+paths:
+  /api/v1/flows:
+    get:
+      summary: Flow definitions (Branch Inventory as data)
+      responses:
+        "200":
+          description: Five flows
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/FlowDefinition" } }
+  /api/v1/cases:
+    get:
+      summary: List cases
+      parameters:
+        - { name: flow, in: query, schema: { type: integer, minimum: 1, maximum: 5 } }
+        - { name: node, in: query, schema: { type: string } }
+        - { name: open, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Cases, newest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/CaseSummary" } }
+    post:
+      summary: Raise a case at a start node
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CaseCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseDetail" }
+        "422": { $ref: "#/components/responses/Error" }
+  /api/v1/cases/{case_id}:
+    get:
+      summary: Case with lines, history and available actions
+      parameters: [{ $ref: "#/components/parameters/CaseId" }]
+      responses:
+        "200":
+          description: Case
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/cases/{case_id}/actions:
+    post:
+      summary: Take one outgoing arrow of the current node
+      parameters: [{ $ref: "#/components/parameters/CaseId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ActionRequest" }
+      responses:
+        "200":
+          description: Case after the move
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CaseDetail" }
+        "403": { description: "FORBIDDEN or SELF_APPROVAL_FORBIDDEN", $ref: "#/components/responses/Error" }
+        "409": { description: "INVALID_TRANSITION, INSUFFICIENT_STOCK or CASE_CLOSED", $ref: "#/components/responses/Error" }
+        "422": { description: "VALIDATION_FAILED (missing reason or input)", $ref: "#/components/responses/Error" }
+  /api/v1/expiry/scan:
+    post:
+      summary: Run the daily expiry scan (F4)
+      responses:
+        "200":
+          description: Cases created
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created, case_ids]
+                properties:
+                  created: { type: integer }
+                  case_ids: { type: array, items: { type: integer } }
+  /api/v1/stock/balances:
+    get:
+      summary: Balances by location, item and batch
+      parameters:
+        - { name: location_id, in: query, schema: { type: integer } }
+        - { name: item_id, in: query, schema: { type: integer } }
+      responses:
+        "200":
+          description: Non-zero balances
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Balance" } }
+  /api/v1/batches/{batch_id}/trace:
+    get:
+      summary: Where a batch is and who received it (F5)
+      parameters: [{ name: batch_id, in: path, required: true, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Trace
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BatchTrace" }
+  /api/v1/dashboard:
+    get:
+      summary: Open cases per flow and node, near-expiry buckets, quarantine totals
+      responses:
+        "200":
+          description: Dashboard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dashboard" }
+  /api/v1/locations:
+    get:
+      summary: Locations
+      responses:
+        "200":
+          description: Locations
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Location" } }
+  /api/v1/vendors:
+    get:
+      summary: Vendors
+      responses:
+        "200":
+          description: Vendors
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Vendor" } }
+  /api/v1/batches:
+    get:
+      summary: Batches, optionally for one item
+      parameters: [{ name: item_id, in: query, schema: { type: integer } }]
+      responses:
+        "200":
+          description: Batches
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/Batch" } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    CaseId: { name: case_id, in: path, required: true, schema: { type: integer } }
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message, request_id]
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+                  details: {}
+                  request_id: { type: string }
+  schemas:
+    Node:
+      type: object
+      required: [key, label, kind]
+      properties:
+        key: { type: string, example: f1_hod_approves }
+        label: { type: string, example: "HOD approves requisition?" }
+        kind: { type: string, enum: [start, task, decision, end] }
+    Edge:
+      type: object
+      required: [id, from, to, approval, reason]
+      properties:
+        id: { type: string, example: f1_hod_approves__approved }
+        from: { type: string }
+        to: { type: string }
+        outcome: { type: [string, "null"], example: Approved }
+        approval: { type: boolean }
+        reason: { type: boolean }
+        inputs: { type: array, items: { type: string } }
+    FlowDefinition:
+      type: object
+      required: [flow, title, starts, nodes, edges]
+      properties:
+        flow: { type: integer }
+        title: { type: string }
+        starts: { type: array, items: { type: string } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/Node" } }
+        edges: { type: array, items: { $ref: "#/components/schemas/Edge" } }
+    LineInput:
+      type: object
+      required: [item_id, qty]
+      properties:
+        item_id: { type: integer }
+        qty: { type: number, exclusiveMinimum: 0 }
+        batch_id: { type: integer }
+        location_id: { type: integer }
+    CaseCreate:
+      type: object
+      required: [flow, start, title]
+      additionalProperties: false
+      properties:
+        flow: { type: integer, minimum: 1, maximum: 5 }
+        start: { type: string, description: "A start node key of the flow" }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        data: { type: object }
+        lines: { type: array, items: { $ref: "#/components/schemas/LineInput" } }
+    CaseSummary:
+      type: object
+      required: [id, flow, node, node_label, title, closed, created_at, updated_at]
+      properties:
+        id: { type: integer }
+        flow: { type: integer }
+        node: { type: string }
+        node_label: { type: string }
+        title: { type: string }
+        closed: { type: boolean }
+        parent_case_id: { type: [integer, "null"] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CaseLine:
+      type: object
+      properties:
+        id: { type: integer }
+        item_id: { type: integer }
+        item_name: { type: string }
+        batch_id: { type: [integer, "null"] }
+        batch_no: { type: [string, "null"] }
+        expiry_date: { type: [string, "null"], format: date }
+        location_id: { type: [integer, "null"] }
+        location_name: { type: [string, "null"] }
+        qty_requested: { type: number }
+        qty_approved: { type: [number, "null"] }
+    CaseEvent:
+      type: object
+      properties:
+        id: { type: integer }
+        from_node: { type: [string, "null"] }
+        outcome: { type: [string, "null"] }
+        to_node: { type: string }
+        actor_name: { type: string }
+        note: { type: [string, "null"] }
+        created_at: { type: string, format: date-time }
+    CaseDetail:
+      allOf:
+        - $ref: "#/components/schemas/CaseSummary"
+        - type: object
+          required: [data, lines, events, actions, child_case_ids]
+          properties:
+            data: { type: object }
+            lines: { type: array, items: { $ref: "#/components/schemas/CaseLine" } }
+            events: { type: array, items: { $ref: "#/components/schemas/CaseEvent" } }
+            actions: { type: array, items: { $ref: "#/components/schemas/Edge" } }
+            child_case_ids: { type: array, items: { type: integer } }
+    ActionRequest:
+      type: object
+      required: [edge]
+      additionalProperties: false
+      properties:
+        edge: { type: string }
+        note: { type: string, maxLength: 1000 }
+        input: { type: object, description: "Values for the edge's inputs" }
+    Balance:
+      type: object
+      properties:
+        location_id: { type: integer }
+        location_name: { type: string }
+        location_kind: { type: string }
+        item_id: { type: integer }
+        item_name: { type: string }
+        batch_id: { type: integer }
+        batch_no: { type: string }
+        expiry_date: { type: string, format: date }
+        blocked: { type: boolean }
+        qty: { type: number }
+    BatchTrace:
+      type: object
+      properties:
+        batch: { $ref: "#/components/schemas/Batch" }
+        holdings: { type: array, items: { $ref: "#/components/schemas/Balance" } }
+        dispensed:
+          type: array
+          items:
+            type: object
+            properties:
+              patient_ref: { type: string }
+              prescriber: { type: [string, "null"] }
+              qty: { type: number }
+              posted_at: { type: string, format: date-time }
+    Dashboard:
+      type: object
+      properties:
+        open_cases:
+          type: array
+          items:
+            type: object
+            properties:
+              flow: { type: integer }
+              node: { type: string }
+              node_label: { type: string }
+              count: { type: integer }
+        near_expiry:
+          type: array
+          items:
+            type: object
+            properties:
+              window_days: { type: integer }
+              batches: { type: integer }
+              qty: { type: number }
+        quarantine:
+          type: array
+          items:
+            type: object
+            properties:
+              location_name: { type: string }
+              qty: { type: number }
+    Location:
+      type: object
+      properties:
+        id: { type: integer }
+        code: { type: string }
+        name: { type: string }
+        kind: { type: string }
+        allocatable: { type: boolean }
+    Vendor:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+    Batch:
+      type: object
+      properties:
+        id: { type: integer }
+        item_id: { type: integer }
+        item_name: { type: string }
+        batch_no: { type: string }
+        expiry_date: { type: string, format: date }
+        vendor_id: { type: [integer, "null"] }
+        blocked: { type: boolean }

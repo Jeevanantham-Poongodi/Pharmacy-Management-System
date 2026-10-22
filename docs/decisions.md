@@ -37,6 +37,7 @@ confirmed until its status here changes.
 | D-015 | Backup and recovery targets | **Pending confirmation** | Production go-live |
 | D-016 | Supabase configuration committed in the public frontend repo | **Pending confirmation** | Production go-live |
 | D-017 | Opening stock enters through an opening-stock document | Approved | — |
+| D-018 | Demo scope for the college demonstration | Approved | Production go-live |
 
 ## D-001: Browser data access goes only through FastAPI
 
@@ -258,3 +259,30 @@ confirmed until its status here changes.
 - **Decision**: an authorised user posts a one-time opening-stock document per location (item,
   batch, expiry, quantity). It is approved by a different user and audited like any other
   posting.
+
+## D-018: Demo scope for the college demonstration
+
+- **Status**: Approved
+- **Decided by**: project owner, 2026-10-22
+- **Context**: the project is demonstrated as a college project. Building Foundation (001) in
+  full and then one feature per flow would delay any working flow screen by many features.
+- **Decision**: feature 002 (`002-flow-pages`) delivers screens and backend support for all five
+  flows of the diagram in one feature, on a simplified Foundation stock layer. The diagram stays
+  the only business-process source (D-010): every node and outcome of the five flows exists in
+  the system, and gaps are recorded, not invented. These constitution rules are relaxed for 002:
+  - **Idempotency keys** (Principle XII) are not required on posting endpoints.
+  - **Concurrency locking** (Principle XIII) is not designed or tested beyond the database's
+    non-negative balance check.
+  - **Test-first** (Principle IX) is reduced to: every diagram branch the feature implements has
+    an automated test, plus tests for FEFO order, the append-only ledger and quarantine
+    exclusion. Tests need not be seen to fail first.
+  - **Separation of duties** (Principle V): when `DEMO_MODE` is on, the user who raised a case
+    may also approve it, and one user may give both NDPS sign-offs, so a single demo account can
+    walk every flow. The checks exist in code and apply whenever `DEMO_MODE` is off.
+  - **Opening and demo data**: a seed command loads fictional demo data, including fictional
+    patients (Principle X allows non-production patient data only when it is not real).
+- **Kept**: browser data access only through FastAPI (D-001), RLS on every table, the
+  append-only ledger and audit trail, FEFO order (D-005, D-013), the D-012 temporary rule,
+  non-allocatable quarantine locations (Principle III).
+- **Blocks**: production go-live. Before go-live the relaxed rules must be restored and Foundation
+  (001) completed.

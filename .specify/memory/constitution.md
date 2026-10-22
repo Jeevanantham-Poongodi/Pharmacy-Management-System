@@ -466,7 +466,24 @@ the region as configuration lets it be corrected without code changes once it is
   decision marked pending MUST NOT be described as confirmed in any spec, plan or document.
 - **Production go-live gate**: production go-live MUST NOT happen while any of these are open:
   D-002 (data region verified), D-003 (frontend hosting confirmed), D-004 (compliance owner
-  sign-off), D-015 (backup and recovery targets) or D-016 (exposed frontend configuration).
+  sign-off), D-015 (backup and recovery targets), D-016 (exposed frontend configuration) or
+  D-018 (demo scope relaxations still in effect).
+
+## Demo Scope Exception (D-018)
+
+The project is demonstrated as a college project. Decision D-018 permits feature 002
+(`002-flow-pages`) to relax these rules, and only these:
+
+- Principle V: with `DEMO_MODE` on, the raiser may approve their own case and one user may give
+  both NDPS sign-offs. The checks MUST exist in code and MUST apply whenever `DEMO_MODE` is off.
+- Principle IX: tests need not be seen to fail first. Every diagram branch the feature implements
+  MUST still have an automated test, as MUST FEFO order, the append-only ledger and quarantine
+  exclusion.
+- Principle XII: posting endpoints need not take an `Idempotency-Key`.
+- Principle XIII: no concurrency design beyond the database's non-negative balance check.
+
+Every other principle applies in full. The exception ends at production go-live (see the
+go-live gate above), when the relaxed rules MUST be restored.
 
 ## Governance
 
@@ -491,4 +508,4 @@ the region as configuration lets it be corrected without code changes once it is
 - **Compliance review**: every plan and pull request MUST verify compliance with this
   constitution.
 
-**Version**: 1.0.0 (draft, not ratified) | **Ratified**: pending | **Last Amended**: 2026-10-22
+**Version**: 1.1.0 (draft, not ratified; 1.1.0 adds the Demo Scope Exception, D-018) | **Ratified**: pending | **Last Amended**: 2026-10-22
