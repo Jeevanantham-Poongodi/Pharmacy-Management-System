@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { Alert, LinearProgress } from '@mui/material'
 import './App.css'
 import { api, ApiError, describeError, type Health, type Me } from './api'
 import { auth, authConfigError } from './supabaseClient'
 import { Items } from './pages/Items'
 import { MfaStep } from './pages/MfaStep'
 import { SignIn } from './pages/SignIn'
+import { AppShell } from './layout/AppShell'
+import { CaseDetail } from './pages/CaseDetail'
+import { Dashboard } from './pages/Dashboard'
+import { FlowCases } from './pages/FlowCases'
+import { Stock } from './pages/Stock'
+import { ReferenceProvider } from './state/reference'
 
 type Profile = { state: 'loading' } | { state: 'ready'; me: Me } | { state: 'mfa' } | { state: 'error'; message: string }
 
@@ -43,6 +51,38 @@ function App() {
 
   if (!authConfigError && !session) return <SignIn />
 
+  // Signed in with a usable profile: the flow screens inside the shell.
+  if (!authConfigError && profile.state === 'ready') {
+    const me = profile.me
+    return (
+      <BrowserRouter>
+        <AppShell me={me} health={health} onSignOut={() => void auth?.signOut()}>
+          <ReferenceProvider
+            fallback={(s) =>
+              s.state === 'error' ? <Alert severity="error">{s.message}</Alert> : <LinearProgress />
+            }
+          >
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/flows/:flowPath" element={<FlowCases />} />
+              <Route path="/cases/:caseId" element={<CaseDetail />} />
+              <Route path="/stock" element={<Stock />} />
+              <Route
+                path="/items"
+                element={
+                  <div className="app">
+                    <Items canWrite={me.permissions.includes('items.write')} />
+                  </div>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </ReferenceProvider>
+        </AppShell>
+      </BrowserRouter>
+    )
+  }
+
   return (
     <div className="app">
       <header>
@@ -64,8 +104,6 @@ function App() {
       <main>
         {authConfigError ? (
           <p className="error card">{authConfigError}</p>
-        ) : profile.state === 'loading' ? (
-          <p className="muted">Loading your account…</p>
         ) : profile.state === 'mfa' ? (
           <MfaStep onDone={() => void loadProfile()} />
         ) : profile.state === 'error' ? (
@@ -74,16 +112,7 @@ function App() {
             <button type="button" onClick={() => void loadProfile()}>Retry</button>
           </div>
         ) : (
-          <>
-            <p className="muted">
-              Signed in as <strong>{profile.me.display_name}</strong> · roles: {profile.me.roles.join(', ') || 'none'}
-            </p>
-            {profile.me.permissions.includes('items.read') ? (
-              <Items canWrite={profile.me.permissions.includes('items.write')} />
-            ) : (
-              <p className="card">Your role has no access to the item master yet. Ask your administrator.</p>
-            )}
-          </>
+          <p className="muted">Loading your account…</p>
         )}
       </main>
     </div>
