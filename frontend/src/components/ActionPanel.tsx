@@ -132,11 +132,20 @@ function ActionDialog({
   const needs = (name: string) => edge.inputs.includes(name)
   const wards = locations.filter((l) => ['ward', 'ot', 'icu'].includes(l.kind))
 
+  // Blank quantity fields are left out rather than sent as empty strings.
+  const entered = Object.fromEntries(Object.entries(qty).filter(([, v]) => v.trim() !== ''))
+  // Quantity already issued or dispensed per line, for the return dialog.
+  const issued = (lineId: number) =>
+    ((detail.data.issued as Record<string, { qty: string }[]> | undefined)?.[lineId] ?? []).reduce(
+      (sum, pick) => sum + Number(pick.qty),
+      0,
+    )
+
   function build(): Record<string, unknown> | undefined {
     const input: Record<string, unknown> = {}
-    if (needs('approved_qty')) input.approved_qty = qty
-    if (needs('return_qty')) input.return_qty = qty
-    if (needs('order_lines')) input.order_lines = qty
+    if (needs('approved_qty')) input.approved_qty = entered
+    if (needs('return_qty')) input.return_qty = entered
+    if (needs('order_lines')) input.order_lines = entered
     if (needs('batches')) input.batches = batches
     if (needs('vendor')) input.vendor_id = vendorId ? Number(vendorId) : undefined
     if (needs('substitute'))
@@ -170,7 +179,11 @@ function ActionDialog({
               <TextField
                 key={line.id}
                 type="number"
-                label={`${qtyLabel}: ${line.item_name} (requested ${Number(line.qty_requested)})`}
+                label={
+                  needs('return_qty')
+                    ? `${qtyLabel}: ${line.item_name} (issued ${issued(line.id)})`
+                    : `${qtyLabel}: ${line.item_name} (requested ${Number(line.qty_requested)})`
+                }
                 value={qty[line.id] ?? ''}
                 onChange={(e) => setQty({ ...qty, [line.id]: e.target.value })}
                 slotProps={{ htmlInput: { min: 0, step: 1 } }}

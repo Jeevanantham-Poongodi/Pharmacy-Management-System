@@ -6,6 +6,7 @@ transaction as the case move that causes them.
 """
 
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal
 
 import psycopg.errors
@@ -54,13 +55,25 @@ def split_fefo(candidates: list[dict], qty: Decimal) -> Allocation:
 
 
 def allocate_fefo(
-    cur: Cursor, hospital_id: int, item_id: int, location_id: int, qty: Decimal
+    cur: Cursor,
+    hospital_id: int,
+    item_id: int,
+    location_id: int,
+    qty: Decimal,
+    *,
+    today: date | None = None,
+    block_on_expiry: bool | None = None,
 ) -> Allocation:
-    block_on_expiry = bool(
-        masters.get_setting(cur, hospital_id, "allocation.block_on_expiry_date", True)
-    )
+    """`today` and `block_on_expiry` may be passed in when the caller already has them, to save
+    two queries per allocation."""
+    if block_on_expiry is None:
+        block_on_expiry = bool(
+            masters.get_setting(cur, hospital_id, "allocation.block_on_expiry_date", True)
+        )
+    if today is None:
+        today = hospital_today(cur, hospital_id)
     candidates = repo.fefo_candidates(
-        cur, hospital_id, item_id, location_id, hospital_today(cur, hospital_id), block_on_expiry
+        cur, hospital_id, item_id, location_id, today, block_on_expiry
     )
     return split_fefo(candidates, qty)
 

@@ -49,9 +49,10 @@ def user_transaction(claims: dict[str, Any]) -> Iterator[Cursor]:
     with get_pool().connection() as conn:
         with conn.transaction():
             with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute("set local role authenticated")
+                # One round trip: set_config('role', …, true) is SET LOCAL ROLE.
                 cur.execute(
-                    "select set_config('request.jwt.claims', %s, true),"
+                    "select set_config('role', 'authenticated', true),"
+                    " set_config('request.jwt.claims', %s, true),"
                     " set_config('request.jwt.claim.sub', %s, true)",
                     (json.dumps(claims), str(claims["sub"])),
                 )

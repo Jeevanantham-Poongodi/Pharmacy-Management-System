@@ -123,6 +123,16 @@ class FlowEnv:
         return self.case(case_id)["lines"]
 
 
+@pytest.fixture(autouse=True)
+def fresh_user_cache():
+    """Tests reuse fake tokens with different users; never serve a cached one."""
+    from app.core.auth import clear_user_cache
+
+    clear_user_cache()
+    yield
+    clear_user_cache()
+
+
 @pytest.fixture
 def flow_env():
     url = get_settings().database_url

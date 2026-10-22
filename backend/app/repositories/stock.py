@@ -37,11 +37,12 @@ def insert_document(
 
 
 def insert_lines(cur: Cursor, hospital_id: int, document_id: int, lines: list[dict]) -> None:
-    for line in lines:
-        cur.execute(
-            "insert into public.ledger_lines"
-            " (hospital_id, document_id, item_id, batch_id, location_id, qty)"
-            " values (%s, %s, %s, %s, %s, %s)",
+    # executemany pipelines the inserts: one round trip instead of one per line.
+    cur.executemany(
+        "insert into public.ledger_lines"
+        " (hospital_id, document_id, item_id, batch_id, location_id, qty)"
+        " values (%s, %s, %s, %s, %s, %s)",
+        [
             (
                 hospital_id,
                 document_id,
@@ -49,8 +50,10 @@ def insert_lines(cur: Cursor, hospital_id: int, document_id: int, lines: list[di
                 line["batch_id"],
                 line["location_id"],
                 line["qty"],
-            ),
-        )
+            )
+            for line in lines
+        ],
+    )
 
 
 def fefo_candidates(

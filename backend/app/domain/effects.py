@@ -3,9 +3,10 @@
 case move's transaction."""
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from functools import cached_property
 from typing import Any
 
 from psycopg import Cursor
@@ -32,16 +33,43 @@ class Ctx:
     input: dict
     note: str | None
     request_id: str | None
+    _locations: dict[str, int] = field(default_factory=dict, repr=False)
 
     @property
     def hospital_id(self) -> int:
         return self.user.hospital_id
 
+    # Looked up once per move, not once per line: each lookup is a database round trip.
+    @cached_property
+    def today(self) -> date:
+        return hospital_today(self.cur, self.hospital_id)
+
+    @cached_property
+    def block_on_expiry(self) -> bool:
+        return bool(
+            masters.get_setting(self.cur, self.hospital_id, "allocation.block_on_expiry_date", True)
+        )
+
     def location(self, kind: str) -> int:
-        row = masters.location_by_kind(self.cur, self.hospital_id, kind)
-        if row is None:
-            raise AppError(409, "LOCATION_MISSING", f"No {kind.replace('_', ' ')} location set up.")
-        return row["id"]
+        if kind not in self._locations:
+            row = masters.location_by_kind(self.cur, self.hospital_id, kind)
+            if row is None:
+                raise AppError(
+                    409, "LOCATION_MISSING", f"No {kind.replace('_', ' ')} location set up."
+                )
+            self._locations[kind] = row["id"]
+        return self._locations[kind]
+
+    def allocate(self, item_id: int, location_id: int, qty: Decimal) -> stock.Allocation:
+        return stock.allocate_fefo(
+            self.cur,
+            self.hospital_id,
+            item_id,
+            location_id,
+            qty,
+            today=self.today,
+            block_on_expiry=self.block_on_expiry,
+        )
 
 
 def _invalid(message: str) -> AppError:
@@ -68,7 +96,8 @@ def _per_line(ctx: Ctx, key: str) -> dict:
     values = ctx.input.get(key) or {}
     if not isinstance(values, dict):
         raise _invalid(f"{key} must map line IDs to values.")
-    return {int(k): v for k, v in values.items()}
+    # A blank field means "not entered", the same as leaving the line out.
+    return {int(k): v for k, v in values.items() if v not in (None, "")}
 
 
 def _post(ctx: Ctx, doc_type: str, lines: list[dict], **extra: Any) -> None:
@@ -122,13 +151,11 @@ def open_linked_case(
     return child["id"]
 
 
-def _shortfalls(cur: Cursor, hospital_id: int, lines: list[dict], location_id: int) -> dict:
+def _shortfalls(ctx: Ctx, location_id: int) -> dict:
     """Per line, how much the location cannot cover by FEFO allocation."""
     result = {}
-    for line in lines:
-        allocation = stock.allocate_fefo(
-            cur, hospital_id, line["item_id"], location_id, line_qty(line)
-        )
+    for line in ctx.lines:
+        allocation = ctx.allocate(line["item_id"], location_id, line_qty(line))
         result[line["id"]] = allocation.shortfall
     return result
 
@@ -141,7 +168,7 @@ def _refill_from_central(ctx: Ctx, needed: dict[int, Decimal]) -> None:
         qty = needed.get(line["id"], Decimal(0))
         if qty <= 0:
             continue
-        allocation = stock.allocate_fefo(ctx.cur, ctx.hospital_id, line["item_id"], central, qty)
+        allocation = ctx.allocate(line["item_id"], central, qty)
         if not allocation.covered:
             raise AppError(
                 409,
@@ -162,7 +189,7 @@ def _issue_from_pharmacy(ctx: Ctx, doc_type: str, to_location: int | None, **ext
         qty = line_qty(line)
         if qty <= 0:
             continue
-        allocation = stock.allocate_fefo(ctx.cur, ctx.hospital_id, line["item_id"], pharmacy, qty)
+        allocation = ctx.allocate(line["item_id"], pharmacy, qty)
         if not allocation.covered:
             raise AppError(
                 409,
@@ -174,7 +201,11 @@ def _issue_from_pharmacy(ctx: Ctx, doc_type: str, to_location: int | None, **ext
             {"batch_id": p.batch_id, "qty": str(p.qty)} for p in allocation.picks
         ]
         repo.update_line(
-            ctx.cur, ctx.hospital_id, line["id"], batch_id=allocation.picks[0].batch_id
+            ctx.cur,
+            ctx.hospital_id,
+            line["id"],
+            batch_id=allocation.picks[0].batch_id,
+            location_id=to_location,
         )
     _post(ctx, doc_type, moves, **extra)
     ctx.data["issued"] = issued
@@ -357,7 +388,7 @@ def qc_fail(ctx: Ctx) -> None:
 
 
 def raise_refill_requisition(ctx: Ctx) -> None:
-    short = _shortfalls(ctx.cur, ctx.hospital_id, ctx.lines, ctx.location("pharmacy"))
+    short = _shortfalls(ctx, ctx.location("pharmacy"))
     lines = [
         {"item_id": line["item_id"], "qty": short[line["id"]]}
         for line in ctx.lines
@@ -374,9 +405,7 @@ def raise_refill_requisition(ctx: Ctx) -> None:
 
 
 def refill_pharmacy(ctx: Ctx) -> None:
-    _refill_from_central(
-        ctx, _shortfalls(ctx.cur, ctx.hospital_id, ctx.lines, ctx.location("pharmacy"))
-    )
+    _refill_from_central(ctx, _shortfalls(ctx, ctx.location("pharmacy")))
 
 
 def issue_to_ward(ctx: Ctx) -> None:
@@ -422,7 +451,7 @@ def modify_order(ctx: Ctx) -> None:
 def substitute_or_purchase(ctx: Ctx) -> None:
     choice = (ctx.input.get("substitute") or {}).get("choice")
     pharmacy = ctx.location("pharmacy")
-    short = _shortfalls(ctx.cur, ctx.hospital_id, ctx.lines, pharmacy)
+    short = _shortfalls(ctx, pharmacy)
     if choice == "substitute":
         item_id = (ctx.input.get("substitute") or {}).get("item_id")
         if not item_id:
@@ -479,9 +508,7 @@ def dispense(ctx: Ctx) -> None:
             )
     if ctx.data.get("emergency_purchase"):
         # Stock bought for this order arrives in the central store (Flow 1); bring it over.
-        _refill_from_central(
-            ctx, _shortfalls(ctx.cur, ctx.hospital_id, ctx.lines, ctx.location("pharmacy"))
-        )
+        _refill_from_central(ctx, _shortfalls(ctx, ctx.location("pharmacy")))
     _issue_from_pharmacy(
         ctx,
         "dispense",
@@ -605,7 +632,7 @@ def _all_formulary(ctx: Ctx) -> bool:
 
 
 def _pharmacy_covers(ctx: Ctx) -> bool:
-    short = _shortfalls(ctx.cur, ctx.hospital_id, ctx.lines, ctx.location("pharmacy"))
+    short = _shortfalls(ctx, ctx.location("pharmacy"))
     return all(v == 0 for v in short.values())
 
 
@@ -615,7 +642,7 @@ def _any_controlled(ctx: Ctx) -> bool:
 
 def _days_left(ctx: Ctx) -> int:
     batch = masters.get_batch(ctx.cur, ctx.hospital_id, int(ctx.data["batch_id"]))
-    return (batch["expiry_date"] - hospital_today(ctx.cur, ctx.hospital_id)).days
+    return (batch["expiry_date"] - ctx.today).days
 
 
 def _max_window(ctx: Ctx) -> int:
@@ -632,9 +659,7 @@ def _stock_left(ctx: Ctx) -> Decimal:
 
 
 def _expired(ctx: Ctx) -> bool:
-    block_on_expiry = bool(
-        masters.get_setting(ctx.cur, ctx.hospital_id, "allocation.block_on_expiry_date", True)
-    )
+    block_on_expiry = ctx.block_on_expiry
     days = _days_left(ctx)
     return days <= 0 if block_on_expiry else days < 0
 

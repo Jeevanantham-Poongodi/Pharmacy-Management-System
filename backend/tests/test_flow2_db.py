@@ -118,3 +118,26 @@ def test_return_rejected_quarantines_and_opens_flow4_case(flow_env):
     assert child["flow"] == 4 and child["node"] == "f4_expired"
     env.act(case)
     assert env.node(case) == "f2_closed"
+
+
+def test_blank_quantity_fields_are_ignored_and_issue_records_ward(flow_env):
+    """Rehearsal defects D2 and D4 (feature 004): a blank quantity in a dialog is "not entered",
+    and issued lines record the ward they went to."""
+    env = flow_env
+    env.stock_in("pharmacy", "para", "BL1", 200, 10)
+    env.stock_in("pharmacy", "amox", "BL2", 200, 10)
+    case = env.create(
+        2, "f2_need", {"ward_location_id": env.loc["ward"]}, [("para", 4), ("amox", 4)]
+    )
+    env.act(case)
+    env.act(case)
+    first, second = env.line_ids(case)
+    env.act(case, "Approved (full or partial)", approved_qty={str(first): "", str(second): 3})
+    assert [line["qty_approved"] for line in env.lines(case)] == [4, 3]
+    env.act(case, "Yes")
+    env.act(case)
+    assert {line["location_name"] for line in env.lines(case)} == {"Ward A"}
+    env.act(case, "Yes")
+    env.act(case)
+    env.act(case, "Yes", return_qty={str(first): "", str(second): 1})
+    assert env.case(case)["data"]["returns"] == {str(second): "1"}

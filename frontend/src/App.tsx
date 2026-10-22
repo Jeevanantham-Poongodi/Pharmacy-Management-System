@@ -14,6 +14,7 @@ import { Dashboard } from './pages/Dashboard'
 import { FlowCases } from './pages/FlowCases'
 import { Stock } from './pages/Stock'
 import { ReferenceProvider } from './state/reference'
+import { loadReference } from './state/referenceData'
 
 type Profile = { state: 'loading' } | { state: 'ready'; me: Me } | { state: 'mfa' } | { state: 'error'; message: string }
 
@@ -51,7 +52,10 @@ function App() {
 
   const accessToken = session?.access_token
   useEffect(() => {
-    if (accessToken) void fetchProfile(setProfile)
+    if (!accessToken) return
+    void fetchProfile(setProfile)
+    // Start the reference data at the same time; the screens' provider picks up this request.
+    loadReference().catch(() => {})
   }, [accessToken])
 
   if (!authConfigError && !session) return <SignIn />
