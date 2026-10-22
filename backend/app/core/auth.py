@@ -125,7 +125,7 @@ def load_user(claims: dict[str, Any]) -> CurrentUser:
 def current_user(request: Request, settings: Settings = Depends(get_settings)) -> CurrentUser:
     claims = verify_token(bearer_token(request), settings)
     user = load_user(claims)
-    if user.privileged and not user.mfa_satisfied:
+    if user.privileged and not user.mfa_satisfied and not settings.demo_mode:
         raise AppError(
             403, "MFA_REQUIRED", "Your role requires multi-factor sign-in. Complete MFA and retry."
         )

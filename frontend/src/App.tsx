@@ -41,6 +41,8 @@ function App() {
     if (accessToken) void loadProfile()
   }, [accessToken, loadProfile])
 
+  if (!authConfigError && !session) return <SignIn />
+
   return (
     <div className="app">
       <header>
@@ -62,8 +64,6 @@ function App() {
       <main>
         {authConfigError ? (
           <p className="error card">{authConfigError}</p>
-        ) : !session ? (
-          <SignIn />
         ) : profile.state === 'loading' ? (
           <p className="muted">Loading your account…</p>
         ) : profile.state === 'mfa' ? (

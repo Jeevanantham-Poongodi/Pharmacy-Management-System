@@ -40,3 +40,5 @@ yarl==1.25.1
 psycopg==3.2.13
 psycopg-binary==3.2.13
 psycopg-pool==3.2.8
+SQLAlchemy==2.0.44
+alembic==1.17.1
