@@ -126,7 +126,13 @@ def demo_user(
     conn: psycopg.Connection, settings: Settings, email: str, password: str, display_name: str
 ) -> None:
     create_auth_user(settings, email, password)
-    row = conn.execute("select id from public.hospitals order by id limit 1").fetchone()
+    # Keep the hospital the account already works in. Adding it to another one would make it a
+    # member of two hospitals, which sign-in refuses (one hospital is served, D-006).
+    row = conn.execute(
+        "select m.hospital_id from public.hospital_members m join auth.users u on u.id = m.user_id"
+        " where lower(u.email) = lower(%s) and m.active order by m.created_at desc limit 1",
+        (email,),
+    ).fetchone() or conn.execute("select id from public.hospitals order by id limit 1").fetchone()
     hospital_id = row[0] if row else create_hospital(conn, "Demo Hospital")
     add_member(conn, hospital_id, email, display_name, "admin")
 
